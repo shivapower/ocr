@@ -21,8 +21,27 @@ func outputText(comments []model.LlmComment) {
 	}
 }
 
+func hasSubtaskErrors(warnings []agent.AgentWarning) bool {
+	for _, w := range warnings {
+		if w.Type == "subtask_error" {
+			return true
+		}
+	}
+	return false
+}
+
 func outputTextWithWarnings(comments []model.LlmComment, warnings []agent.AgentWarning) {
-	outputText(comments)
+	if len(comments) == 0 {
+		if hasSubtaskErrors(warnings) {
+			fmt.Println("Some files could not be reviewed due to errors (see warnings below).")
+		} else {
+			fmt.Println("No comments generated. Looks good to me.")
+		}
+	} else {
+		for _, c := range comments {
+			renderComment(c)
+		}
+	}
 	if len(warnings) > 0 {
 		for _, w := range warnings {
 			fmt.Fprintf(os.Stderr, "[ocr] WARNING [%s] %s: %s\n", w.Type, w.File, w.Message)
@@ -168,11 +187,19 @@ func outputJSONWithWarnings(comments []model.LlmComment, warnings []agent.AgentW
 		Comments: comments,
 	}
 	if len(comments) == 0 {
-		out.Message = "No comments generated. Looks good to me."
+		if hasSubtaskErrors(warnings) {
+			out.Message = "Some files could not be reviewed due to errors."
+		} else {
+			out.Message = "No comments generated. Looks good to me."
+		}
 	}
 	if len(warnings) > 0 {
 		out.Warnings = warnings
-		out.Status = "completed_with_warnings"
+		if hasSubtaskErrors(warnings) {
+			out.Status = "completed_with_errors"
+		} else {
+			out.Status = "completed_with_warnings"
+		}
 	}
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")

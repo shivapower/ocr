@@ -137,6 +137,7 @@ type Agent struct {
 	totalTokensUsed   int64 // accumulated total tokens from all LLM calls, accessed atomically
 	totalInputTokens  int64 // accumulated input/prompt tokens, accessed atomically
 	totalOutputTokens int64 // accumulated completion tokens, accessed atomically
+	subtaskFailed     int64 // count of failed subtasks, accessed atomically
 	warningsMu        sync.Mutex
 	warnings          []AgentWarning
 	compressionMu     sync.Mutex
@@ -386,9 +387,11 @@ func (a *Agent) dispatchSubtasks(ctx context.Context) ([]model.LlmComment, error
 			}
 
 			if err := a.executeSubtask(fileCtx, d); err != nil {
+				atomic.AddInt64(&a.subtaskFailed, 1)
 				fmt.Fprintf(stdout.Writer(), "[ocr] Subtask error for %s: %v\n", d.NewPath, err)
 				telemetry.ErrorEvent(fileCtx, "subtask.error", err,
 					telemetry.AnyToAttr("file.path", d.NewPath))
+				a.recordWarning("subtask_error", d.NewPath, err.Error())
 			}
 		}(a.diffs[i])
 	}
@@ -399,6 +402,13 @@ func (a *Agent) dispatchSubtasks(ctx context.Context) ([]model.LlmComment, error
 	if a.args.CommentWorkerPool != nil {
 		a.args.CommentWorkerPool.Await()
 	}
+
+	failed := atomic.LoadInt64(&a.subtaskFailed)
+	total := int64(len(a.diffs))
+	if failed > 0 && failed == total {
+		return nil, fmt.Errorf("all %d file review(s) failed — check your LLM configuration and API key", total)
+	}
+
 	return a.args.CommentCollector.Comments(), nil
 }
 

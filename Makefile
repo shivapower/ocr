@@ -20,7 +20,7 @@ LD_FLAGS    := -s -w \
 
 define BUILD_PLATFORM
 	GOOS=$(1) GOARCH=$(2) CGO_ENABLED=0 $(GO) build -ldflags "$(LD_FLAGS)" \
-		-o $(DIST_DIR)/$(BINARY_NAME)-$(VERSION)-$(1)-$(2) \
+		-o $(DIST_DIR)/$(BINARY_NAME)-$(1)-$(2) \
 		./cmd/opencodereview
 endef
 
@@ -57,7 +57,7 @@ build-all: build-linux-amd64 build-linux-arm64 build-darwin-amd64 build-darwin-a
 
 # Generate SHA256 checksums for all release binaries
 sha256sum: build-all
-	cd $(DIST_DIR) && shasum -a 256 $(BINARY_NAME)-$(VERSION)-* | sort > sha256sum.txt
+	cd $(DIST_DIR) && shasum -a 256 $(BINARY_NAME)-* | sort > sha256sum.txt
 
 # Full release: clean → build all platforms → checksums
 dist: clean build-all sha256sum

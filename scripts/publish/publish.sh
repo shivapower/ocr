@@ -118,18 +118,18 @@ upload_to_git_repo() {
     mkdir -p "$bin_dir"
 
     local count=0
-    for f in "$dist_dir"/opencodereview-${VERSION_TAG}-*; do
+    for f in "$dist_dir"/opencodereview-*; do
         [ -f "$f" ] || continue
-        local base target
+        [[ "$(basename "$f")" == *.txt ]] && continue
+        local base
         base=$(basename "$f")
-        target="${base/opencodereview-${VERSION_TAG}-/opencodereview-}"
-        info "  Copying ${target}"
-        cp "$f" "$bin_dir/${target}"
+        info "  Copying ${base}"
+        cp "$f" "$bin_dir/${base}"
         count=$((count + 1))
     done
     if [ "$count" -eq 0 ]; then
         rm -rf "$tmp_repo"
-        die "No binaries found matching opencodereview-${VERSION_TAG}-*"
+        die "No binaries found matching opencodereview-*"
     fi
     success "Copied ${count} binaries"
 

@@ -379,6 +379,9 @@ func (c *composedResolver) mergeWithSystemRule(path, rule string) string {
 	if systemRule == "" {
 		return rule
 	}
+	if rule == "" {
+		return systemRule
+	}
 
 	return "## System-Specific Rules (Mandatory)\n\n" +
 		systemRule +
@@ -423,6 +426,9 @@ func matchProjectRuleEntry(pr *ProjectRule, path string) *ProjectRuleEntry {
 	lowerPath := strings.ToLower(path)
 	for i := range pr.Rules {
 		entry := &pr.Rules[i]
+		if entry.Rule == "" && !entry.MergeSystemRule {
+			continue
+		}
 		expanded := expandBraces(entry.Path)
 		for _, p := range expanded {
 			if matched, _ := doublestar.Match(strings.ToLower(p), lowerPath); matched {

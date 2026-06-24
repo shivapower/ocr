@@ -325,6 +325,72 @@ func TestNewResolver_CustomRuleOverridesDefault(t *testing.T) {
 	}
 }
 
+func TestNewResolver_EmptyRuleSkippedAndFallsBack(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	dir := t.TempDir()
+	ocrDir := filepath.Join(dir, ".opencodereview")
+	if err := os.MkdirAll(ocrDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	ruleJSON := `{"rules":[{"path":"**/*.go","rule":""},{"path":"internal/**/*.go","rule":"second-rule"}]}`
+	if err := os.WriteFile(filepath.Join(ocrDir, "rule.json"), []byte(ruleJSON), 0o644); err != nil {
+		t.Fatalf("write rule.json: %v", err)
+	}
+
+	resolver, _, err := NewResolver(dir, "")
+	if err != nil {
+		t.Fatalf("NewResolver: %v", err)
+	}
+
+	// main.go matches the first entry (empty rule) — should skip it and fall
+	// back to system rule instead of returning "".
+	got := resolver.Resolve("main.go")
+	if got == "" {
+		t.Fatal("expected fallback to system rule, got empty string")
+	}
+
+	// internal/pkg/foo.go matches both entries — the empty first entry should
+	// be skipped, and the second entry should win.
+	got = resolver.Resolve("internal/pkg/foo.go")
+	if got != "second-rule" {
+		t.Fatalf("expected second-rule, got %q", got)
+	}
+}
+
+func TestNewResolver_EmptyRuleMergeSystemRuleReturnsSystemOnly(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	dir := t.TempDir()
+	ocrDir := filepath.Join(dir, ".opencodereview")
+	if err := os.MkdirAll(ocrDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	ruleJSON := `{"rules":[{"path":"**/*.go","rule":"","merge_system_rule":true}]}`
+	if err := os.WriteFile(filepath.Join(ocrDir, "rule.json"), []byte(ruleJSON), 0o644); err != nil {
+		t.Fatalf("write rule.json: %v", err)
+	}
+
+	resolver, _, err := NewResolver(dir, "")
+	if err != nil {
+		t.Fatalf("NewResolver: %v", err)
+	}
+
+	systemRule, err := LoadDefault()
+	if err != nil {
+		t.Fatalf("LoadDefault: %v", err)
+	}
+	wantSystemRule := systemRule.Resolve("main.go")
+
+	got := resolver.Resolve("main.go")
+	if got != wantSystemRule {
+		t.Fatalf("expected system rule only, got %q", truncate(got, 120))
+	}
+	if strings.Contains(got, "User-Specific Rules") {
+		t.Fatal("should not contain User-Specific Rules header when user rule is empty")
+	}
+}
+
 func TestNewResolver_ProjectRuleReplacesSystemRuleByDefault(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 

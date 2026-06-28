@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <title>OCR 与 ECC Rust 代码评审规则对比报告</title>
+  <style>
+    @page { size: A4; margin: 20mm 18mm; }
+    * { box-sizing: border-box; }
+    body {
+      font-family: "WenQuanYi Micro Hei", "Noto Sans CJK SC", "Microsoft YaHei", sans-serif;
+      color: #222;
+      line-height: 1.65;
+      font-size: 11pt;
+      margin: 0;
+      padding: 0;
+    }
+    .cover {
+      page-break-after: always;
+      min-height: 250mm;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      text-align: center;
+      padding: 40px;
+    }
+    .cover h1 {
+      font-size: 26pt;
+      color: #142850;
+      margin-bottom: 12px;
+    }
+    .cover h2 {
+      font-size: 14pt;
+      color: #555;
+      font-weight: normal;
+      margin-bottom: 48px;
+    }
+    .cover .meta {
+      text-align: left;
+      color: #666;
+      font-size: 10pt;
+      line-height: 1.8;
+    }
+    h1 {
+      color: #142850;
+      font-size: 16pt;
+      border-bottom: 2px solid #d6e4f5;
+      padding-bottom: 6px;
+      margin-top: 24px;
+    }
+    h2 {
+      color: #2a5080;
+      font-size: 12.5pt;
+      margin-top: 18px;
+    }
+    p { margin: 8px 0; }
+    ul { margin: 8px 0 12px 0; padding-left: 22px; }
+    li { margin: 4px 0; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 12px 0 18px 0;
+      font-size: 9.5pt;
+    }
+    th, td {
+      border: 1px solid #c8d6e5;
+      padding: 7px 8px;
+      vertical-align: top;
+    }
+    th {
+      background: #e8f0fa;
+      color: #142850;
+      text-align: left;
+    }
+    .summary-box {
+      background: #f4f8fc;
+      border-left: 4px solid #2a5080;
+      padding: 12px 14px;
+      margin: 12px 0;
+    }
+    .footer-note {
+      margin-top: 28px;
+      font-size: 9pt;
+      color: #888;
+      text-align: center;
+    }
+    .page-break { page-break-before: always; }
+  </style>
+</head>
+<body>
+
+<div class="cover">
+  <h1>OCR 与 ECC Rust 代码评审规则对比报告</h1>
+  <h2>Open Code Review vs everything-claude-code<br/>Rust 审查规则差异与优劣势分析</h2>
+  <div class="meta">
+    <div><strong>报告日期：</strong>2026-06-28</div>
+    <div><strong>对比对象：</strong></div>
+    <div>• OCR — <code>internal/config/rules/rule_docs/rust.md</code>, <code>cargo_toml.md</code></div>
+    <div>• ECC — <code>agents/rust-reviewer.md</code>, <code>commands/rust-review.md</code>, <code>skills/rust-patterns/SKILL.md</code></div>
+    <div style="margin-top:12px;"><strong>仓库：</strong></div>
+    <div>github.com/alibaba/open-code-review</div>
+    <div>github.com/affaan-m/everything-claude-code</div>
+  </div>
+</div>
+
+<h1>一、执行摘要</h1>
+<div class="summary-box">
+  <p>本报告对比 <strong>Open Code Review（OCR）</strong> 与 <strong>everything-claude-code（ECC）</strong> 两套体系中针对 Rust 代码的评审规则。两者并非同一类产品：OCR 将规则作为 prompt 注入统一审查流水线；ECC 则通过专用 subagent，在运行 cargo 工具链后再进行语义审查。</p>
+  <p><strong>核心结论：</strong>OCR 在 Rust 语义深度（unsafe、async cancellation、FFI、API 设计）上更强；ECC 在工程门禁（check/clippy/fmt/test/audit）、严重级别划分与团队规范上更完整。最佳实践是将 ECC 的工具链门禁与 OCR 的语义规则结合使用。</p>
+</div>
+
+<h1>二、规则来源与架构差异</h1>
+<table>
+  <tr><th>维度</th><th>OCR</th><th>ECC</th></tr>
+  <tr><td>规则文件</td><td>rust.md + cargo_toml.md</td><td>rust-reviewer.md + rust-review + rust-patterns</td></tr>
+  <tr><td>触发方式</td><td>审查 *.rs 时自动匹配</td><td>手动 /rust-review 或调用 agent</td></tr>
+  <tr><td>工具链门禁</td><td>规则本身不要求 cargo 命令</td><td>强制 cargo check/clippy/fmt/test</td></tr>
+  <tr><td>依赖审计</td><td>无</td><td>可选 cargo audit / cargo deny</td></tr>
+  <tr><td>输出形式</td><td>行级 code_comment + JSON</td><td>CRITICAL/HIGH/MEDIUM 分级报告</td></tr>
+  <tr><td>多语言统一</td><td>是（同一 review 流水线）</td><td>否（Rust 专用）</td></tr>
+</table>
+
+<p>架构本质：</p>
+<ul>
+  <li><strong>OCR</strong> = 规则注入 + 深度语义清单 + 多语言统一审查流水线</li>
+  <li><strong>ECC</strong> = 工具链门禁 + 工程 SOP + Agent 审查</li>
+</ul>
+
+<h1>三、共同覆盖的检查类别</h1>
+<ul>
+  <li><strong>错误处理：</strong>生产路径滥用 unwrap/expect/panic/todo</li>
+  <li><strong>unsafe：</strong>缺少安全说明、裸指针风险</li>
+  <li><strong>所有权：</strong>不必要 clone、String/Vec 过度拥有</li>
+  <li><strong>并发/async：</strong>async 中阻塞 I/O、Send/Sync 边界</li>
+  <li><strong>安全：</strong>SQL/命令注入、硬编码密钥、路径遍历</li>
+  <li><strong>性能：</strong>热路径多余分配、循环内重复创建</li>
+  <li><strong>模式匹配：</strong>业务枚举滥用通配符、非穷尽匹配</li>
+  <li><strong>代码卫生：</strong>死代码、Clippy allow 滥用</li>
+</ul>
+
+<h1>四、OCR 更强领域</h1>
+<table>
+  <tr><th>类别</th><th>OCR 额外强调</th><th>ECC 相对薄弱点</th></tr>
+  <tr><td>所有权进阶</td><td>RefCell 误用、Rc/Arc 循环引用需 Weak</td><td>主要关注不必要 clone</td></tr>
+  <tr><td>unsafe 细节</td><td>static mut、transmute、MaybeUninit、FFI</td><td>主要要求 SAFETY 注释</td></tr>
+  <tr><td>并发细节</td><td>锁跨 await、原子序、check-then-act</td><td>无原子序细节</td></tr>
+  <tr><td>async 进阶</td><td>cancellation safety、JoinHandle 丢弃</td><td>主要提 blocking in async</td></tr>
+  <tr><td>API 设计</td><td>newtype、typed ID、trait 边界</td><td>规则较少</td></tr>
+  <tr><td>Cargo 工程</td><td>独立 cargo_toml.md 规则</td><td>manifest 规则较弱</td></tr>
+</table>
+
+<h1>五、ECC 更强领域</h1>
+<table>
+  <tr><th>类别</th><th>ECC 额外强调</th><th>OCR 相对薄弱点</th></tr>
+  <tr><td>工具链门禁</td><td>必须先通过 check/clippy/fmt/test</td><td>无强制编译测试门禁</td></tr>
+  <tr><td>依赖安全</td><td>cargo audit / cargo deny</td><td>无供应链审计</td></tr>
+  <tr><td>流程规范</td><td>CRITICAL/HIGH/MEDIUM + 审批标准</td><td>无统一严重级别</td></tr>
+  <tr><td>结构指标</td><td>函数 &gt;50 行、嵌套 &gt;4 层</td><td>无量化结构阈值</td></tr>
+  <tr><td>生态约定</td><td>thiserror/anyhow、public 文档</td><td>较少生态约定</td></tr>
+  <tr><td>并发工程</td><td>Mutex poison、死锁、无界 channel</td><td>无 poison/deadlock 规则</td></tr>
+</table>
+
+<div class="page-break"></div>
+
+<h1>六、优劣势总结</h1>
+
+<h2>6.1 OCR 优势</h2>
+<ul>
+  <li>按文件类型自动匹配，无需额外命令</li>
+  <li>unsafe/async/FFI 等高级语义覆盖更深</li>
+  <li>多语言统一审查流水线，输出可落地到 PR 行级评论</li>
+  <li>Cargo.toml 专项规则完整</li>
+  <li>不依赖本地 Rust 构建环境即可做 diff 审查</li>
+</ul>
+
+<h2>6.2 OCR 劣势</h2>
+<ul>
+  <li>无 cargo check/clippy/test 硬门禁</li>
+  <li>无严重级别与审批标准</li>
+  <li>无 cargo audit 供应链漏洞检测</li>
+  <li>缺少 thiserror/anyhow、文档、函数长度等工程规范</li>
+  <li>纯 prompt 驱动，执行稳定性依赖模型</li>
+</ul>
+
+<h2>6.3 ECC 优势</h2>
+<ul>
+  <li>先跑工具链再审查，减少无效语义分析</li>
+  <li>Clippy/fmt/test/audit 形成确定性第一层过滤</li>
+  <li>严重级别清晰，适合 Block/Warning/Approve 流程</li>
+  <li>Mutex poison、死锁、channel 等工程经验丰富</li>
+  <li>rust-patterns skill 示例丰富，适合 onboarding</li>
+</ul>
+
+<h2>6.4 ECC 劣势</h2>
+<ul>
+  <li>必须本地可构建，对 snippet/跨 crate 场景不友好</li>
+  <li>Rust 专用，难融入多语言统一审查</li>
+  <li>cancellation、原子序、FFI 等高级语义覆盖不如 OCR</li>
+  <li>无行级评论定位体系</li>
+  <li>依赖 Claude Code 生态（Bash/Read/Grep）</li>
+</ul>
+
+<h1>七、关键差异对照表</h1>
+<table>
+  <tr><th>检查项</th><th>OCR</th><th>ECC</th></tr>
+  <tr><td>cargo check/clippy/fmt/test</td><td>无</td><td>有</td></tr>
+  <tr><td>cargo audit/deny</td><td>无</td><td>有</td></tr>
+  <tr><td>严重级别/审批标准</td><td>无</td><td>有</td></tr>
+  <tr><td>unsafe 深度</td><td>强</td><td>中</td></tr>
+  <tr><td>async cancellation</td><td>有</td><td>弱</td></tr>
+  <tr><td>Mutex poison/deadlock</td><td>无</td><td>有</td></tr>
+  <tr><td>thiserror/anyhow</td><td>无</td><td>有</td></tr>
+  <tr><td>public API 文档</td><td>弱</td><td>强</td></tr>
+  <tr><td>Cargo.toml 规则</td><td>强</td><td>弱</td></tr>
+  <tr><td>行级评论定位</td><td>有</td><td>无</td></tr>
+  <tr><td>多语言统一审查</td><td>有</td><td>无</td></tr>
+</table>
+
+<h1>八、推荐组合方案</h1>
+<p>若希望兼顾精度与工程可执行性，建议采用分层审查：</p>
+<ol>
+  <li><strong>第一层（ECC）：</strong>cargo check / clippy / fmt / test / audit 作为硬门禁</li>
+  <li><strong>第二层（OCR）：</strong>rust.md 做 unsafe、async、FFI、API 设计等语义审查</li>
+  <li><strong>第三层（OCR）：</strong>cargo_toml.md 审查 manifest、feature、MSRV、发布元数据</li>
+  <li><strong>第四层（ECC）：</strong>严重级别、文档规范、函数长度等团队流程规则</li>
+</ol>
+
+<h1>九、场景选型建议</h1>
+<table>
+  <tr><th>目标场景</th><th>更适合</th></tr>
+  <tr><td>多语言 PR 自动审查、行级评论、低误报</td><td>OCR</td></tr>
+  <tr><td>Rust 单体/库项目深度审查、必须先绿 CI</td><td>ECC</td></tr>
+  <tr><td>unsafe/async/FFI 高风险代码</td><td>OCR 规则更深</td></tr>
+  <tr><td>团队规范、文档、Clippy、依赖审计</td><td>ECC 更完整</td></tr>
+  <tr><td>只改几行 Rust、无完整构建环境</td><td>OCR</td></tr>
+  <tr><td>Rust 项目 onboarding / 教学</td><td>ECC + rust-patterns</td></tr>
+</table>
+
+<h1>十、参考资料</h1>
+<ul>
+  <li>OCR rust.md: internal/config/rules/rule_docs/rust.md</li>
+  <li>OCR cargo_toml.md: internal/config/rules/rule_docs/cargo_toml.md</li>
+  <li>ECC rust-reviewer: github.com/affaan-m/everything-claude-code/agents/rust-reviewer.md</li>
+  <li>ECC rust-review: github.com/affaan-m/everything-claude-code/commands/rust-review.md</li>
+  <li>ECC rust-patterns: github.com/affaan-m/everything-claude-code/skills/rust-patterns/SKILL.md</li>
+</ul>
+
+<div class="footer-note">本报告由 Open Code Review 代码库分析自动生成 · 2026-06-28</div>
+
+</body>
+</html>
